@@ -44,6 +44,12 @@ of the [H-JEPA paper](https://arxiv.org/abs/2610.06805).
 It is built on [LeWM](https://github.com/lucas-maes/le-wm) and
 [stable-worldmodel](https://github.com/galilai-group/stable-worldmodel).
 
+## Reproduction Notes
+
+This copy includes local reproduction changes. See [REPRODUCTION.md](REPRODUCTION.md)
+for their scope, setup commands, code provenance, and measured results. The paper
+results below remain the upstream authors' results.
+
 ## 1) Installation
 
 ```bash

@@ -1,3 +1,4 @@
+import gc
 import os
 
 os.environ['MUJOCO_GL'] = 'egl'
@@ -48,6 +49,29 @@ class GradClipModule(spt.Module):
             params = [p for p in group["params"] if p.grad is not None]
             if params:
                 torch.nn.utils.clip_grad_norm_(params, float(gradient_clip_val))
+
+
+class PeriodicGarbageCollection(pl.Callback):
+    """Release unreachable tensor cycles before they exhaust GPU memory."""
+
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+        if (batch_idx + 1) % 25 == 0:
+            gc.collect()
+
+    def on_validation_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0):
+        if (batch_idx + 1) % 25 == 0:
+            gc.collect()
+
+    def on_train_epoch_end(self, trainer, pl_module):
+        gc.collect()
+
+
+def _configure_manual_gradient_clipping(trainer, module):
+    # spt 0.1.7 reads these fields when clipping in its manual optimizer step.
+    if not module.automatic_optimization and trainer.gradient_clip_val is not None:
+        trainer.gradient_clip_val_ = trainer.gradient_clip_val
+        trainer.gradient_clip_algorithm_ = trainer.gradient_clip_algorithm
+        trainer.gradient_clip_val = None
 
 
 class ResumableManager(spt.Manager):
@@ -150,6 +174,9 @@ def _hjepa_training_forward(self, batch, stage, cfg):
 
 @hydra.main(version_base=None, config_path="config/train", config_name=None)
 def run(cfg):
+    # Manager seeds the training loop later; seed before model initialization too.
+    pl.seed_everything(int(cfg.seed), workers=True)
+
     #########################
     ##       dataset       ##
     #########################
@@ -311,6 +338,7 @@ def run(cfg):
     trainer = pl.Trainer(
         **cfg.trainer,
         callbacks=[
+        PeriodicGarbageCollection(),
         *resume_callbacks,
         debug_cleanup_callback,
         object_dump_callback,
@@ -321,6 +349,7 @@ def run(cfg):
         logger=logger,
         enable_checkpointing=False,
     )
+    _configure_manual_gradient_clipping(trainer, world_model)
 
     manager_ckpt_path = run_dir / f"{cfg.output_model_name}_weights.ckpt"
     if cfg.get("quick_debug", False) or not manager_ckpt_path.exists():
