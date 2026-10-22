@@ -46,9 +46,11 @@ It is built on [LeWM](https://github.com/lucas-maes/le-wm) and
 
 ## Reproduction Notes
 
-This copy includes local reproduction changes. See [REPRODUCTION.md](REPRODUCTION.md)
-for their scope, setup commands, code provenance, and measured results. The paper
-results below remain the upstream authors' results.
+This copy includes the latest A100 reproduction wrappers for Cube and Push-T.
+Core code matches the upstream revision used on the server; the earlier manual-GC
+variant remains in Git history. See [REPRODUCTION.md](REPRODUCTION.md) for exact
+code provenance, NJU setup, training/evaluation commands, and multi-seed results.
+The paper results below remain the upstream authors' results.
 
 ## 1) Installation
 

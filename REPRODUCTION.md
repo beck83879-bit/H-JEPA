@@ -1,48 +1,42 @@
-# Local H-JEPA Reproduction
+# H-JEPA Server Reproduction
 
-Updated: 2026-10-19.
+Updated: 2026-10-23. This is an independent reproduction of
+[kevinghst/H-JEPA](https://github.com/kevinghst/H-JEPA), not the authors' repository.
+The authors' attribution and MIT license are preserved.
 
-This repository preserves the authors' code, attribution, and MIT license from
-[kevinghst/H-JEPA](https://github.com/kevinghst/H-JEPA), based on commit
-`97054ecaff83e13839195ec4b92d74c08a0127c5`.
-It is an independent reproduction copy, not the authors' official repository.
+## Which Code Is Published
 
-## Changes Included Here
+The model, training entry, data code, configurations, planner, and environments
+match upstream commit `97054ecaff83e13839195ec4b92d74c08a0127c5`. On 2026-10-23,
+all 169 files in the A100 training source manifest were checked against that
+commit byte-for-byte. This is the source used by the latest Cube and Push-T
+single-GPU multi-seed experiments, not the earlier DDP implementation.
 
-The local changes in `h_jepa/main_hjepa.py` are:
+The previous GitHub revision `6a5679e` had periodic manual garbage collection,
+early seeding inside `main_hjepa.py`, and a manual-clipping compatibility helper.
+Those changes are no longer in the core entry, matching the latest server source.
+Python automatic garbage collection remains enabled; gradient clipping remains
+the upstream value of 1.0. This update does not change a running server experiment.
 
-- Call `pl.seed_everything(cfg.seed, workers=True)` before constructing the model.
-  The upstream Manager seeds later; a command-line seed alone therefore does not
-  establish the same initialization as the authors' historical training run.
-- Collect unreachable Python objects every 25 training/validation batches and at
-  the end of each training epoch. This addresses accumulated reference cycles
-  without reducing the configured batch size, model depth, or training budget.
-- Transfer gradient-clipping settings to the fields consumed by
-  stable-pretraining 0.1.7 in manual optimization, and disable Lightning's
-  incompatible automatic clipping field. The intended clipping value is retained.
+The exact server wrappers are included, without edits, under:
 
-Training and evaluation YAML files, model architecture, losses, planner, and
-environment success criteria are unchanged from the upstream base in this copy.
-These compatibility changes have not been shown to reproduce identical numerical
-training trajectories across dependency versions or GPUs.
+- `reproduction/cube_seeds_20261020/train_entry.py` and `postprocess.py`.
+- `reproduction/pusht_seeds_20261020/train_entry.py` and `postprocess.py`.
 
-## Code Provenance
+Their SHA256 values are in `reproduction/SHA256SUMS`. The training wrappers seed
+before model construction and record the initial model hash. The Push-T wrapper
+also logs scalar memory/GC counters every 50 optimizer steps and asserts the
+single-GPU update budget. Neither wrapper calls `gc.collect()` or `empty_cache()`.
+They use the original model, losses, queues, optimizer, and dataset code.
 
-This branch contains the local checkout and its compatibility changes. The A100
-experiments summarized below used a separately archived server source snapshot.
-That snapshot also included runtime monitoring, DDP-related synchronization, and
-contiguous latent-queue storage changes. Its world size was one, so DDP branches
-were inactive. It did not use this checkout's manual-clipping compatibility helper.
+The wrappers, rather than a bare `python main_hjepa.py`, reproduce the latest
+initialization procedure. They are not identical to the unwrapped upstream entry.
+Older results and changes remain documented in
+[the historical note](docs/reproduction_20261019.md) and Git history.
 
-Consequently, the results below are experiment records, not a claim that this
-exact branch produced those checkpoints. The archived server source and full
-experiment artifacts are not bundled in this repository. Do not infer exact
-historical reproducibility from matching config names alone.
+## Environment and Data
 
-## Setup and Data
-
-Use Python 3.11.13 and the dependencies in `pyproject.toml`. For the NJU environment,
-use the NJU PyPI mirror, retaining the upstream CUDA wheel index:
+Use Python 3.11.13 and the repository dependencies. For NJU:
 
 ```bash
 git clone https://github.com/beck83879-bit/H-JEPA.git
@@ -54,16 +48,16 @@ python -m pip install -e '.[train,env]' \
   --extra-index-url https://download.pytorch.org/whl/cu128
 python -m pip check
 export HJEPA_HOME="$HOME/.hjepa"
-mkdir -p "$HJEPA_HOME"
 ```
 
-The extra CUDA index requires network access or an available wheel cache. Resolve
-dependency-check failures before training; do not silently replace the pinned
-PyTorch version. Some upstream dependencies have lower bounds only, so this install
-command is not a complete lockfile for historical experiments.
+The CUDA index needs network access or cached wheels. This is not a historical
+environment lockfile: lower-bounded dependencies can resolve differently. The
+existing A100 environment also had an external checkpoint-saving compatibility
+patch; it is not part of these repository files. Exact environment reconstruction
+requires the archived environment/setup records in addition to this code.
 
-Follow README sections 3.1 and 3.2 for downloads, Cube splitting, Push-T orientation
-preparation, and official task checksums. Required simulation training files are:
+Follow the original README for downloads, Cube train/validation splitting,
+Push-T orientation preparation, and task checksums. Simulation data files are:
 
 | Task | Files under `HJEPA_HOME` |
 | --- | --- |
@@ -72,61 +66,94 @@ preparation, and official task checksums. Required simulation training files are
 | FourRoom | `fourroom_tp35_d1.h5`, `fourroom_tp35_d1_val.h5`, `fourroom_tp35_d1_probing.h5`, `fourroom_tp35_d1_probing_val.h5` |
 | AntMaze | `visual_antmaze_medium_explore_stitch_train.h5`, `visual_antmaze_medium_stitch_val.h5`, `visual_antmaze_medium_probing_train.h5`, `visual_antmaze_medium_probing_eval.h5` |
 
-Official fixed evaluation tasks belong under `h_jepa/assets/eval_trajs/`, with
-the task-specific subdirectories documented in the upstream README. Datasets,
-checkpoints, downloaded tasks, credentials, and local run outputs are not uploaded.
+Place official fixed tasks in the task-specific directories under
+`h_jepa/assets/eval_trajs/`. Data, weights, credentials, generated videos, and
+large experiment logs are not included in this Git repository.
 
-## Training and Evaluation
+## Latest Single-GPU Run Procedure
 
-Run from `h_jepa/`. Assign an available GPU for each command:
-
-```bash
-cd h_jepa
-CUDA_VISIBLE_DEVICES=0 python main_hjepa.py --config-name fourroom_hjepa_l3 seed=42
-CUDA_VISIBLE_DEVICES=0 python main_hjepa.py --config-name cube_hjepa_l3 seed=42
-CUDA_VISIBLE_DEVICES=0 python main_hjepa.py --config-name pusht_hjepa_l2 seed=42
-CUDA_VISIBLE_DEVICES=0 python main_hjepa.py --config-name ant_hjepa_l3 seed=42
-```
-
-These commands run sequentially when pasted together. Training performs final
-planning evaluation automatically. For a separate Cube evaluation:
+Run this from the repository root in the configured environment. Select an
+available physical GPU and a new output tag; the example uses GPU0 and seed43.
+The training command is long-running and occupies that GPU.
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 python eval.py --config-name cube_l3 seed=42 \
-  policy="$HJEPA_HOME/ckpts/cube/cube_hjepa_l3/seed42/cube_hjepa_l3_object.ckpt" \
-  output.dir=eval_cube_l3_seed42_review
+export HJEPA_REPO="$PWD"
+export PYTHONPATH="$HJEPA_REPO:$HJEPA_REPO/h_jepa${PYTHONPATH:+:$PYTHONPATH}"
+export HJEPA_TRAIN_SEED=43
+export CUDA_VISIBLE_DEVICES=0
+export MUJOCO_EGL_DEVICE_ID=0
+export MUJOCO_GL=egl
+export WANDB_MODE=disabled
+export OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2
+export HJEPA_RUN_TAG="manual_$(date +%Y%m%d_%H%M%S)"
+export HJEPA_INIT_RECORD="$HJEPA_HOME/reproduction/$HJEPA_RUN_TAG/initialization.json"
+mkdir -p "$(dirname "$HJEPA_INIT_RECORD")"
+cd "$HJEPA_REPO/h_jepa"
+
+# Push-T L2: 9 epochs, batch128, BF16, 119628 optimizer updates.
+export HJEPA_RUN_SUBDIR="pusht/$HJEPA_RUN_TAG/pusht_hjepa_l2/seed$HJEPA_TRAIN_SEED"
+python "$HJEPA_REPO/reproduction/pusht_seeds_20261020/train_entry.py" \
+  --config-name pusht_hjepa_l2 seed="$HJEPA_TRAIN_SEED" \
+  subdir="$HJEPA_RUN_SUBDIR" trainer.devices=1 loader.batch_size=128 \
+  planning_eval.enabled=false final_probing_decoding_eval.enabled=false
+
+# Run only after training exits successfully.
+export HJEPA_RUN_DIR="$HJEPA_HOME/ckpts/$HJEPA_RUN_SUBDIR"
+python "$HJEPA_REPO/reproduction/pusht_seeds_20261020/postprocess.py" \
+  inspect "$HJEPA_RUN_DIR" --train-seed "$HJEPA_TRAIN_SEED"
+python "$HJEPA_REPO/reproduction/pusht_seeds_20261020/postprocess.py" \
+  evaluate "$HJEPA_RUN_DIR" --train-seed "$HJEPA_TRAIN_SEED"
+python "$HJEPA_REPO/reproduction/pusht_seeds_20261020/postprocess.py" \
+  probe "$HJEPA_RUN_DIR" --train-seed "$HJEPA_TRAIN_SEED"
 ```
 
-Use a new evaluation directory when changing planner settings: completed tasks are
-skipped on rerun. The paper reports model seeds 42, 43, and 44 with matching planner
-seeds. One trained seed evaluated on 50 tasks is not the full three-seed protocol.
-The complete upstream simulation matrix contains 84 training runs; the four
-commands above cover selected hierarchical configurations only.
+For Cube, use a fresh tag and initialization record, replace the wrapper directory
+with `cube_seeds_20261020`, the config with `cube_hjepa_l3`, and the run subdirectory
+with `cube/$HJEPA_RUN_TAG/cube_hjepa_l3/seed$HJEPA_TRAIN_SEED`.
+Cube uses 8 epochs and 83912 optimizer updates. Both tasks retain the upstream
+12 DataLoader workers and prefetch factor 8. Training-time planning/probe callbacks
+are disabled because the same stages run separately after training; they must
+not be omitted. The probe budget is 25 epochs.
 
-## Recorded Results and Limits
+The evaluation wrapper checks task SHA256, budget, horizon, candidate counts,
+noise, and per-task metrics. It uses planner seed42, matmul `highest`, CUDA matmul
+TF32=false, cuDNN TF32=true, and cuDNN benchmark=false. This is our unified
+standalone evaluation setting, not a claim to know every authors' runtime flag.
+It refuses to overwrite an existing evaluation/probe directory. `check-eval`
+validates the evaluation configuration without running rollouts.
 
-A100 experiments used training seed 42, base planner seed 42, and the 50 official
-fixed tasks. Official-checkpoint controls used the same evaluation environment.
+| Setting | Cube L3 | Push-T L2 |
+| --- | --- | --- |
+| Fixed tasks | 50 | 50 |
+| Goal offset / action budget | 20 / 30 | 75 / 90 |
+| Level horizons | [2, 2, 1] | [2, 8] |
+| Candidate counts | [25, 800, 800] | [50, 400] |
+| Optimization steps per level | 90 | 90 |
+| Action noise per level | [0, 0.01, 0.01] | [0, 0.01] |
 
-| Task | Our A100 checkpoint | Official checkpoint control | Paper mean +/- SE |
-| --- | --- | --- | --- |
-| FourRoom L3 | 98% (49/50) | Not measured | 96.0 +/- 1.1% |
-| Cube L3 | 44% (22/50) | 58% (29/50) | 60.0 +/- 5.0% |
-| Push-T L2 | 32% (16/50) | 46% (23/50) | 45.3 +/- 1.3% |
+## Latest Results and Limits
 
-The controls narrow the Cube/Push-T gap to differences in the learned checkpoint,
-including weights, BatchNorm statistics, and latent-action queues. They do not
-isolate one faulty component or prove a particular training change caused the gap.
-Matching tensor shapes, action-normalization values, and optimizer update counts
-does not establish identical training histories. AntMaze is omitted because this
-record does not establish its final result.
+| Task | Training seed | Planner seed | Successes | Success rate |
+| --- | --- | --- | --- | --- |
+| Cube L3 | 43 | 42 | 26/50 | 52% |
+| Cube L3 | 44 | 42 | 28/50 | 56% |
+| Push-T L2 | 43 | 42 | 18/50 | 36% |
+| Push-T L2 | 44 | 42 | 26/50 | 52% |
+| Push-T L2 | 45 | 42 | 18/50 | 36% |
+| Push-T L2 | 46 | Not evaluated | Training OOM | Not a 0% result |
 
-Observed failures include Cube never lifting the object sufficiently, and Push-T
-failing the joint agent/block position criterion despite a small angular error.
-Cube success checks 3D object position within 4 cm. Push-T requires joint position
-error below 20 pixels and block angle error below 20 degrees. These observations
-are not proof that orientation probing or the memory-management changes caused
-the performance difference.
+Cube's two new seeds average 54%, versus the paper's 60.0 +/- 5.0% mean +/- SE.
+Push-T's three completed seeds average 41.3 +/- 5.3% mean +/- SE, versus
+45.3 +/- 1.3% in the paper. Push-T seed46 failed with CUDA OOM, so this average
+conditions on completed runs. Retaining upstream automatic GC does not eliminate
+the observed long-run OOM risk. Do not silently reduce the batch or inject manual
+GC and then label the experiment as the same run.
 
-Full multi-seed reproduction and controlled diagnosis of the learned dynamics,
-normalization statistics, and model-specific action queues remain outstanding.
+These are repeated evaluations of the same 50 fixed tasks. Training seeds differ
+from the paper's 42/43/44 set, and planner seed42 is held fixed here rather than
+matched to every training seed. This is not the full paper protocol or a controlled
+GC ablation. The historical Cube run labeled seed42 used a different initialization
+procedure and should not be merged into an unexplained three-seed average.
+
+The previously published 32% single-GPU and 28% DDP Push-T runs used different
+source/runtime variants. They are not results of these latest single-GPU wrappers.
